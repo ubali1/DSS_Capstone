@@ -1,0 +1,257 @@
+---
+title: 'Coursera Data Science Capstone: Milestone Report'
+author: "Utsav Bali"
+date: "12 May 2017"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Introduction
+This document is a milestone report for the data science Capstone project. This project aims to create a predictive text model. Natural Language Processing tools are used to perform statistical analysis, text occurrence and counts and associations on a sample Text Corpus of documents. 
+This report summarizes a few features of the training data set along with an exploratory analysis followed by highlighting plans for creating a predictive model. 
+
+## Data Source
+The data file for this project is downloaded from the following location: https://d396qusza40orc.cloudfront.net/dsscapstone/dataset/Coursera-SwiftKey.zip
+
+```{r}
+# specify the source and destination of the download
+destination_file <- "Coursera-SwiftKey.zip"
+source_file <- "https://d396qusza40orc.cloudfront.net/dsscapstone/dataset/Coursera-SwiftKey.zip"
+
+# execute the download
+if (!file.exists("Coursera-SwiftKey.zip")) {
+        download.file(source_file, destination_file)
+        # extract the files from the zip file
+        unzip(destination_file)
+}
+
+# Let's list the data files
+list.files(path = "./final/en_US")
+```
+
+This data set consists of text from 3 sources: News, Blogs and Twitter feeds. The text data is provided in 4 languages: German, English, Russian and Finnish. In this project we shall be analyzing the English data set. 
+
+## Loading libraries
+Let's load the following libraries for this project: 
+
+```{r}
+suppressWarnings(library(stringi))
+suppressWarnings(library(ggplot2))
+suppressWarnings(library(tm))
+suppressWarnings(library(RWeka))
+```
+
+## Exploratory Data Analysis
+Let's compute the file size, line and word count for each of the three News, Blogs and Twitter feeds datasets. 
+
+Let's read the data files: 
+```{r}
+# import the blogs and twitter datasets in text mode
+blogs <- readLines("final/en_US/en_US.blogs.txt", encoding="UTF-8")
+news <- readLines("final/en_US/en_US.news.txt", encoding="UTF-8")
+twitter <- readLines("final/en_US/en_US.twitter.txt", encoding="UTF-8")
+
+# import the news dataset in binary mode
+#con <- file("final/en_US/en_US.news.txt", open="rb")
+#news <- readLines(con, encoding="UTF-8")
+#close(con)
+#rm(con)
+```
+
+Here is a quick summary of the characters in each line for blogs, news and twitter dataset
+```{r}
+# number of characters per line
+character_blogs <- summary(nchar(blogs))
+character_news <- summary(nchar(news))
+character_twitter <- summary(nchar(twitter))
+
+character_blogs
+character_news
+character_twitter
+```
+
+Let's look at a summary of each of the three data sets. The summary will return the total number of lines (Lines), number of lines with at least one non_WHITE_SPACE character (LinesNEmpty), total number of Unicode code points (Chars) and total number of Unicode code points that are non WHITE_SPACE (CharsNWhite): 
+
+```{r}
+# more character analysis
+stats_blogs <- stri_stats_general(blogs)
+stats_news <- stri_stats_general(news)
+stats_twitter <- stri_stats_general(twitter)
+
+stats_blogs
+stats_news
+stats_twitter
+```
+
+Now let's create a table that outputs the total size, word count and length of each dataset
+
+```{r}
+# textual analysis
+words_blogs <- sum(stri_count_words(blogs))
+words_news <- sum(stri_count_words(news))
+words_twitter <- sum(stri_count_words(twitter))
+
+# file size (in MegaBytes)
+size_blogs <- file.info("final/en_US/en_US.blogs.txt")$size/1024^2
+size_news <- file.info("final/en_US/en_US.news.txt")$size/1024^2
+size_twitter <- file.info("final/en_US/en_US.twitter.txt")$size/1024^2
+
+# number of lines
+length_blogs <- length(blogs)
+length_news <- length(news)
+length_twitter <- length(twitter)
+
+text_summary_table <- data.frame(filename = c("blogs", "news", "twitter"), 
+                                 size = c(size_blogs, size_news, size_twitter),
+                                 words = c(words_blogs, words_news, words_twitter), 
+                                 length = c(length_blogs, length_news, length_twitter)
+                                 )
+
+text_summary_table
+```
+
+## Data Sampling
+We shall take a sample of the data set to create a 'sample text' file by combining 5% of text sample from each of the three data sets. This will allows us to reduce the time required for data pre-processing and cleaning, as well as, tokenization. 
+
+```{r}
+set.seed(6346)
+blogs_sample <- sample(blogs, length(blogs)*0.05)
+news_sample <- sample(news, length(news)*0.05)
+twitter_sample <- sample(twitter, length(twitter)*0.05)
+
+# drop non UTF-8 characters
+twitter_sample <- sapply(twitter_sample, function(row) iconv(row, from = "latin1", to = "UTF-8", sub=""))
+```
+
+Let's combine the three samples into a single file and see the length of the sample and the total number of words in the file: 
+```{r}
+text_sample <- c(blogs_sample, news_sample, twitter_sample)
+length(text_sample)
+sum(stri_count_words(text_sample))
+```
+
+## Data Preprocessing
+This section will aim to create a corpus from the text_sample file. This file contains characters, symbols, words, spacing, special characters, URL etc. that do not provide helpful information for text prediction. We shall use the 'tm' library to create the corpus. For cleaning profanities in the text, we used a list of bad words downloaded from http://www.cs.cmu.edu/~biglou/resources/bad-words.txt. For text mining, the tm package and RWeka package are used in this study.The following functions will be used to process the corpus. 
+
+```{r}
+#The tm package provides a range of transformations to allow us to clean the corpus. Let's take a look at the functions available
+getTransformations()
+
+#We shall create a function called toSpace which allows us to replace a text with a space. This allows us to keep from contatenating words upon removing unnecesary punctuation. the content_transformer function in the tm package takes a function as an input which specifies the transformation required. In our case below, the gsub function then replaces the pattern provided and replaces that with space.
+toSpace <- content_transformer(function(x, pattern) gsub(pattern, "", x))
+
+# upload profanity file downloaded from http://www.cs.cmu.edu/~biglou/resources/bad-words.txt
+profanities <- file("./profanities.txt", "r")
+profanity_vector <- VectorSource(readLines(profanities))
+
+preprocessCorpus <- function(corpus){
+        corpus <- tm_map(corpus, toSpace, "/|@|\\|")
+        corpus <- tm_map(corpus, toSpace, "'")
+        corpus <- tm_map(corpus, toSpace, " -")
+        corpus <- tm_map(corpus, toSpace, "/.")
+        
+        # there is no transformation in the tm package to give us lower case, so we once again use the content_transformer function as follows -
+        corpus <- tm_map(corpus, content_transformer(tolower))
+        # the remaining functions are part of the tm package
+        corpus <- tm_map(corpus, removeNumbers)
+        corpus <- tm_map(corpus, removePunctuation)
+        #stopwords  such as definite and indefinite articles and common verbs and qualifiers are selected out as follows - 
+        corpus <- tm_map(corpus, removeWords, stopwords("english"))
+        # removeWords take the input from 'profanity_vector' vector and removes them from the Corpus
+        corpus <- tm_map(corpus, removeWords, profanity_vector)
+        # stripWhitespace removes whitespace
+        corpus <- tm_map(corpus, stripWhitespace)
+        return(corpus)
+}
+
+# function to tabulate frequency. This function will take the term document matrix and arrange it in decreasing order first followed by calculting the sum of the rows of the TDM first and then report the words and their frequency of occurrence in the corpus via a data frame titled freq_frame
+freq_frame <- function(tdm){
+        freq <- sort(rowSums(as.matrix(tdm)), decreasing = TRUE)
+        freq_frame <- data.frame(word = names(freq), freq = freq)
+        return(freq_frame)
+}
+
+BigramTokenizer <- function(x) NGramTokenizer(x, Weka_control(min = 2, max = 2))
+TrigramTokenizer <- function(x) NGramTokenizer(x, Weka_control(min = 3, max = 3))
+QuadgramTokenizer <- function(x) NGramTokenizer(x, Weka_control(min = 4, max = 4))
+```
+
+We preprocess the text sample to form Term Document Matrices.
+
+```{r}
+# Let's convert the text_sample file into the Corpus object
+text_sample <- VCorpus(VectorSource(text_sample))
+
+#Let's have a look at document 3 in the corpus
+writeLines(as.character(text_sample[[3]]))
+
+#We'll use the preprocessCorpus function defined earlier to process the corpus
+text_sample <- preprocessCorpus(text_sample)
+
+# Let's take another look at the corpus after applying the preprocessCorpus function
+writeLines(as.character(text_sample[[3]]))
+
+# We shall now use the TermDocumentMatrix (TDM) function to create a mathematic matrix where documents are represented by rows and terms or words by column. 
+tdm1a <- TermDocumentMatrix(text_sample)
+tdm1a
+# We can see that there are a total of 123606 words in 166833 documents. Let's take a look at a subset of these (5 terms and 10 documents)
+inspect(tdm1a[1:5, 1:10])
+
+# Since TDMs will inevitably be quite large documents, we shall aim to remove sparse terms which will not aid in text prediction and save the matrix as tdm1
+tdm1 <- removeSparseTerms(tdm1a, 0.99)
+# and finally we shall apply the freq_frame function to the cleaned up tdm1 matrix
+freq1_frame <- freq_frame(tdm1)
+
+# We repeat the above transformations, using tokenization and ngrams
+tdm2a <- TermDocumentMatrix(text_sample, control=list(tokenize=BigramTokenizer))
+tdm2 <- removeSparseTerms(tdm2a, 0.999)
+freq2_frame <- freq_frame(tdm2)
+
+tdm3a <- TermDocumentMatrix(text_sample, control=list(tokenize=TrigramTokenizer))
+tdm3 <- removeSparseTerms(tdm3a, 0.9999)
+freq3_frame <- freq_frame(tdm3)
+
+tdm4a <- TermDocumentMatrix(text_sample, control=list(tokenize=QuadgramTokenizer))
+tdm4 <- removeSparseTerms(tdm4a, 0.9999)
+freq4_frame <- freq_frame(tdm4)
+```
+
+## Exploratory analysis
+
+For each Term Document Matrix, we list the most common unigrams, bigrams, trigrams and fourgrams.
+
+```{r}
+ggplot(subset(freq1_frame, freq>5000), aes(x=reorder(word,freq), y=freq, fill=freq)) +
+    geom_bar(stat="identity") + theme_bw() +     theme(axis.title.y = element_blank()) +
+    labs(y="Frequency", title="Most common unigrams in text sample")
+```
+
+```{r}
+ggplot(subset(freq2_frame, freq>300), aes(x=reorder(word,freq), y=freq, fill=freq)) +
+    geom_bar(stat="identity") + theme_bw() + theme(axis.title.y = element_blank()) +
+    labs(y="Frequency", title="Most common bigrams in text sample")
+```
+
+```{r}
+ggplot(subset(freq3_frame, freq>50), aes(x=reorder(word,freq), y=freq, fill=freq)) +
+    geom_bar(stat="identity") + 
+    theme_bw() +
+    theme(axis.title.y = element_blank()) +
+    labs(y="Frequency", title="Most common trigrams in text sample")
+```
+
+```{r}
+ggplot(subset(freq4_frame, freq>20), aes(x=reorder(word,freq), y=freq, fill=freq)) +
+    geom_bar(stat="identity") +
+    theme_bw() +
+    theme(axis.title.y = element_blank()) +
+    labs(y="Frequency", title="Most common quadgrams in text sample")
+```
+
+## Next Steps
+
+A Shiny App shall be created consisting of a text input widget where the user enters a text. A submit button would enable the user to send the text to the predictive algorithm which would return the most likely next words to follow in the text. An additional widget would allow the user to choose either the top-3 or top-5 words to folow. 
+The Shiny app server will receive the typed text and preprocess the input using the preprocessCorpus function and display a list of suggested next words based on the prediction model. 
