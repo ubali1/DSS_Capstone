@@ -20,9 +20,22 @@ shinyUI(pageWithSidebar(
                         p('The source text data used for creating a Corpus was downloaded from HC Corpora (www.corpora.heliohost.org) and used to generate Term Document Matrices. The data set downloaded from HC Corpora was preprocessed first to remove punctuations, whitespace, numbers etc. and then a Corpus was subsequently generated which was used for tokenization and the generation of n-grams. Data frames containing bi, tri and quad-gram frequency matrices were used for next word prediction which corresponded to the word with the highest frequency based on the sequence of preceding user input text.'), 
                         p('This application uses a shiny reactive function to simultaneously generate the next word whilst the user is entering some text in the field and the predicted next word is outputted into a new cell along with the text inputted by the user.'),
                         h4('Location'),
-                        p('This app is hosted on shinyapps.io: '),
-                        p('The code for generating this app along with the milestone report can be found on GitHub at: https://github.com/ubali1/DSS_Capstone'),
-                        p('A slide deck pitching this app can be found here: ')
+                        
+                        # adding the new div tag to the sidebar            
+                        tags$div(class="header", checked=NA,
+                                 tags$p("This app is hosted on:"), 
+                                 tags$a(href="https://ubali1.shinyapps.io/DSS_Capstone", "https://ubali1.shinyapps.io/DSS_Capstone")
+                        ),
+                        
+                        tags$div(class="header", checked=NA,
+                                 tags$p("The code for generating this app along with the milestone report can be found on GitHub"), 
+                                 tags$a(href="https://github.com/ubali1/DSS_Capstone", "https://github.com/ubali1/DSS_Capstone")
+                        ),
+                        
+                        tags$div(class="header", checked=NA,
+                                 tags$p("A slide deck pitching this app can be found"), 
+                                 tags$a(href="https://ubali1.github.io/Capstone_Slidify", "https://ubali1.github.io/Capstone_Slidify")
+                        )
                ), # end of tabPanel 1
                
                tabPanel("Word Prediction",

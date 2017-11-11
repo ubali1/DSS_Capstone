@@ -1,0 +1,233 @@
+---
+title: "Word Prediction Capstone"
+author: "Utsav Bali"
+date: "18 October 2017"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Introduction
+This document is a milestone report for the data science Capstone project. This project aims to create a predictive text model. Natural Language Processing tools are used to perform statistical analysis, text occurrence and counts and associations on a sample Text Corpus of documents. 
+This report summarizes a few features of the training data set along with an exploratory analysis followed by highlighting plans for creating a predictive model. 
+
+## Data Source
+The data file for this project is downloaded from the following location: https://d396qusza40orc.cloudfront.net/dsscapstone/dataset/Coursera-SwiftKey.zip
+
+```{r}
+# specify the source and destination of the download
+destination_file <- "Coursera-SwiftKey.zip"
+source_file <- "https://d396qusza40orc.cloudfront.net/dsscapstone/dataset/Coursera-SwiftKey.zip"
+
+# execute the download
+if (!file.exists("Coursera-SwiftKey.zip")) {
+        download.file(source_file, destination_file)
+        # extract the files from the zip file
+        unzip(destination_file)
+}
+
+# Let's list the data files
+list.files(path = "./final/en_US")
+```
+
+This data set consists of text from 3 sources: News, Blogs and Twitter feeds. The text data is provided in 4 languages: German, English, Russian and Finnish. In this project we shall be analyzing the English data set. 
+
+## Loading libraries
+Let's load the following libraries for this project: 
+
+```{r}
+suppressWarnings(library(stringi))
+suppressWarnings(library(ggplot2))
+suppressWarnings(library(tm))
+#suppressWarnings(library(RWeka))
+suppressWarnings(library(quanteda))
+suppressWarnings(library(data.table))
+```
+
+## Exploratory Data Analysis
+Let's compute the file size, line and word count for each of the three News, Blogs and Twitter feeds datasets. 
+
+Let's read the data files: 
+```{r}
+# import the blogs and twitter datasets in text mode
+blogs <- readLines("final/en_US/en_US.blogs.txt", encoding="UTF-8")
+news <- readLines("final/en_US/en_US.news.txt", encoding="UTF-8")
+twitter <- readLines("final/en_US/en_US.twitter.txt", encoding="UTF-8")
+
+# import the news dataset in binary mode
+#con <- file("final/en_US/en_US.news.txt", open="rb")
+#news <- readLines(con, encoding="UTF-8")
+#close(con)
+#rm(con)
+```
+
+Here is a quick summary of the characters in each line for blogs, news and twitter dataset
+```{r}
+# number of characters per line
+character_blogs <- summary(nchar(blogs))
+character_news <- summary(nchar(news))
+character_twitter <- summary(nchar(twitter))
+
+character_blogs
+character_news
+character_twitter
+```
+
+Let's look at a summary of each of the three data sets. The summary will return the total number of lines (Lines), number of lines with at least one non_WHITE_SPACE character (LinesNEmpty), total number of Unicode code points (Chars) and total number of Unicode code points that are non WHITE_SPACE (CharsNWhite): 
+
+```{r}
+# more character analysis
+stats_blogs <- stri_stats_general(blogs)
+stats_news <- stri_stats_general(news)
+stats_twitter <- stri_stats_general(twitter)
+
+stats_blogs
+stats_news
+stats_twitter
+```
+
+Now let's create a table that outputs the total size, word count and length of each dataset
+
+```{r}
+# textual analysis
+words_blogs <- sum(stri_count_words(blogs))
+words_news <- sum(stri_count_words(news))
+words_twitter <- sum(stri_count_words(twitter))
+
+# file size (in MegaBytes)
+size_blogs <- file.info("final/en_US/en_US.blogs.txt")$size/1024^2
+size_news <- file.info("final/en_US/en_US.news.txt")$size/1024^2
+size_twitter <- file.info("final/en_US/en_US.twitter.txt")$size/1024^2
+
+# number of lines
+length_blogs <- length(blogs)
+length_news <- length(news)
+length_twitter <- length(twitter)
+
+text_summary_table <- data.frame(filename = c("blogs", "news", "twitter"), 
+                                 size = c(size_blogs, size_news, size_twitter),
+                                 words = c(words_blogs, words_news, words_twitter), 
+                                 length = c(length_blogs, length_news, length_twitter)
+                                 )
+
+text_summary_table
+```
+
+## Data Sampling
+We shall take a sample of the data set to create a 'sample text' file by combining 10% of text sample from each of the three data sets. This will allows us to reduce the time required for data pre-processing and cleaning, as well as, tokenization. 
+
+```{r}
+
+## let's define a sampling function 
+
+sample_p <- function(x, p){
+  sample(x, size = round(length(x)*p, 0))
+} # end of sample_p function 
+
+
+set.seed(6346)
+text_sample <- c(sample_p(blogs, 0.1), sample_p(news, 0.1), sample_p(twitter, 0.1))
+
+# drop non UTF-8 characters
+#text_sample <- sapply(text_sample, function(row) iconv(row, from = "latin1", to = "UTF-8", sub=""))
+text_sample <- sapply(text_sample, function(row) iconv(row, from = "UTF-8", to = "ASCII", sub=""))
+
+length(text_sample)
+sum(stri_count_words(text_sample))
+```
+
+## Data Preprocessing
+This section will aim to create a corpus from the text_sample file. This file contains characters, symbols, words, spacing, special characters, URL etc. that do not provide helpful information for text prediction. We shall use the 'tm' library to create the corpus. For cleaning profanities in the text, we used a list of bad words downloaded from http://www.cs.cmu.edu/~biglou/resources/bad-words.txt. For text mining, the tm package and RWeka package are used in this study.The following functions will be used to process the corpus. 
+
+```{r}
+#The tm package provides a range of transformations to allow us to clean the corpus. Let's take a look at the functions available
+getTransformations()
+
+#We shall create a function called toSpace which allows us to replace a text with a space. This allows us to keep from contatenating words upon removing unnecesary punctuation. the content_transformer function in the tm package takes a function as an input which specifies the transformation required. In our case below, the gsub function then replaces the pattern provided and replaces that with space.
+toSpace <- content_transformer(function(x, pattern) gsub(pattern, "", x))
+
+# upload profanity file downloaded from http://www.cs.cmu.edu/~biglou/resources/bad-words.txt
+profanities <- file("./profanities.txt", "r")
+profanity_vector <- VectorSource(readLines(profanities))
+
+preprocessCorpus <- function(text){
+        text <- tm_map(text, toSpace, "/|@|\\|")
+        text <- tm_map(text, toSpace, "'")
+        text <- tm_map(text, toSpace, " -")
+        text <- tm_map(text, toSpace, "/.")
+        text <- tm_map(text, toSpace, "&amp")
+        text <- tm_map(text, toSpace, "(RT|via)((?:\\b\\W*@\\w+)+)")
+        text <- tm_map(text, toSpace, "@\\w+")
+        text <- tm_map(text, toSpace, "[[:punct:]]")
+        text <- tm_map(text, toSpace, "[[:digit:]]")
+        text <- tm_map(text, toSpace, "http\\w+")
+        text <- tm_map(text, toSpace, "[ \t]{2,}")
+        text <- tm_map(text, toSpace, "^\\s+|\\s+$")
+
+        # there is no transformation in the tm package to give us lower case, so we once again use the content_transformer function as follows -
+        text <- tm_map(text, content_transformer(tolower))
+        # the remaining functions are part of the tm package
+        text <- tm_map(text, removeNumbers)
+        text <- tm_map(text, removePunctuation)
+        #stopwords  such as definite and indefinite articles and common verbs and qualifiers are selected out as follows - 
+        text <- tm_map(text, removeWords, stopwords("english"))
+        # removeWords take the input from 'profanity_vector' vector and removes them from the Corpus
+        text <- tm_map(text, removeWords, profanity_vector)
+        # stripWhitespace removes whitespace
+        text <- tm_map(text, stripWhitespace)
+        return(text)
+}
+
+# quanteda function to tokenize corpus and tabulate frequency. 
+freq_frame <- function(x, n = 1L){
+  # We have to change the text_sample back to corpus object as the tokenize function doesn't take the Vcorpus object      
+  ngrams <- tokenize(corpus(x), remove_numbers = FALSE, remove_punct = TRUE, remove_symbols = FALSE, remove_separators = TRUE, remove_twitter = TRUE, remove_hyphens = TRUE, remove_url = TRUE, ngrams = n, concatenator = " ")
+        #quanteda::tokenize(toLower(corpus(x)), ngrams = n, concatenator = " ")
+        ngramsDT <- data.table(word = ngrams$text1)
+        ngramsDT <- ngramsDT[,.(frequency = .N), by = .(word)]
+        setorder(ngramsDT, -frequency)
+        return(ngramsDT)
+} #end of freq_frame function
+```
+
+We preprocess the text sample to form Term Document Matrices.
+
+```{r}
+# Let's convert the text_sample file into the Corpus object
+# text_sample <- corpus(text_sample) - doesn't work for the preprocessCorpus function
+text_sample <- VCorpus(VectorSource(text_sample))
+
+
+#Let's have a look at document 3 in the corpus
+writeLines(as.character(text_sample[[10]]))
+
+#We'll use the preprocessCorpus function defined earlier to process the corpus
+text_sample <- preprocessCorpus(text_sample)
+
+# Let's take another look at the corpus after applying the preprocessCorpus function
+writeLines(as.character(text_sample[[10]]))
+```
+
+Let's generate the ngram data tables as below using the freq_frame function
+
+```{r}
+unigrams <- freq_frame(text_sample)
+saveRDS(unigrams, file = "unigrams_Data.rds")
+rm(unigrams)
+
+bigrams <- freq_frame(text_sample, n =2)
+saveRDS(bigrams, file = "bigrams_Data.rds")
+rm(bigrams)
+
+trigrams <- freq_frame(text_sample, n = 3)
+saveRDS(trigrams, file = "trigrams_Data.rds")
+rm(trigrams)
+
+quadgrams <- freq_frame(text_sample, n = 4)
+saveRDS(quadgrams, file = "quadgrams_Data.rds")
+rm(quadgrams)
+```
+
+
